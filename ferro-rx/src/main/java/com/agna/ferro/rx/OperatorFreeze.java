@@ -20,11 +20,14 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.ListIterator;
 
-import rx.Observable;
-import rx.Subscriber;
-import rx.exceptions.Exceptions;
-import rx.functions.Func2;
-import rx.observers.SerializedSubscriber;
+import io.reactivex.Observable;
+import io.reactivex.ObservableOperator;
+import io.reactivex.Observer;
+import io.reactivex.annotations.NonNull;
+import io.reactivex.disposables.Disposable;
+import io.reactivex.exceptions.Exceptions;
+import io.reactivex.functions.BiFunction;
+import io.reactivex.observers.SerializedObserver;
 
 /**
  * This operator freezes all rx events (onNext, onError, onComplete) when freeze selector emits true,
@@ -38,29 +41,27 @@ import rx.observers.SerializedSubscriber;
  * Observable after this operator can emit event in different threads
  */
 
-public class OperatorFreeze<T> implements Observable.Operator<T, T> {
+public class OperatorFreeze<T> implements ObservableOperator<T, T> {
 
     private final Observable<Boolean> freezeSelector;
-    private final Func2<T, T, Boolean> replaceFrozenEventPredicate;
+    private final BiFunction<T, T, Boolean> replaceFrozenEventPredicate;
 
     public OperatorFreeze(Observable<Boolean> freezeSelector,
-                          Func2<T, T, Boolean> replaceFrozenEventPredicate) {
+                          BiFunction<T, T, Boolean> replaceFrozenEventPredicate) {
         this.freezeSelector = freezeSelector;
         this.replaceFrozenEventPredicate = replaceFrozenEventPredicate;
     }
 
     public OperatorFreeze(Observable<Boolean> freezeSelector) {
-        this(freezeSelector, new Func2<T, T, Boolean>() {
+        this(freezeSelector, new BiFunction<T, T, Boolean>() {
             @Override
-            public Boolean call(T frozenEvent, T newEvent) {
+            public Boolean apply(@NonNull T frozenEvent, @NonNull T newEvent) throws Exception {
                 return false;
             }
         });
-
     }
 
-
-    @Override
+    /*@Override
     public Subscriber<? super T> call(Subscriber<? super T> child) {
 
         final FreezeSubscriber<T> freezeSubscriber = new FreezeSubscriber<>(
@@ -89,37 +90,55 @@ public class OperatorFreeze<T> implements Observable.Operator<T, T> {
 
         return freezeSubscriber;
 
-    }
+    }*/
+
+    @Override
+    public Observer<? super T> apply(Observer<? super T> observer) throws Exception {
+        final FreezeSubscriber<T> freezeSubscriber = new FreezeSubscriber<>(
+                new SerializedObserver<T>(observer),
+                replaceFrozenEventPredicate);
+
+        final Observer<Boolean> freezeSelectorSubscriber = new Observer<Boolean>() {
+            @Override
+            public void onComplete() {
+                freezeSubscriber.forceOnComplete();
+            }
+
+            @Override
+            public void onError(Throwable e) {
+                freezeSubscriber.forceOnError(e);
+            }
+
+            @Override
+            public void onSubscribe(Disposable d) {
+
+            }
+
+            @Override
+            public void onNext(Boolean freeze) {
+                freezeSubscriber.setFrozen(freeze);
+            }
+        };
+        //observer.add(freezeSubscriber);
+        //observer.add(freezeSelectorSubscriber);
+        freezeSelector.subscribe(freezeSelectorSubscriber); //todo unsafeSubscribe
+
+        return freezeSubscriber;    }
 
 
-    private static final class FreezeSubscriber<T> extends Subscriber<T> {
+    private static final class FreezeSubscriber<T> implements Observer<T> {
 
-        private final Subscriber<T> child;
-        private final Func2<T, T, Boolean> replaceFrozenEventPredicate;
+        private final Observer<T> child;
+        private final BiFunction<T, T, Boolean> replaceFrozenEventPredicate;
         private final List<T> frozenEventsBuffer = new LinkedList<>();
 
         private boolean frozen = true;
         private boolean done = false;
         private Throwable error = null;
 
-        public FreezeSubscriber(Subscriber<T> child, Func2<T, T, Boolean> replaceFrozenEventPredicate) {
+        public FreezeSubscriber(Observer<T> child, BiFunction<T, T, Boolean> replaceFrozenEventPredicate) {
             this.child = child;
             this.replaceFrozenEventPredicate = replaceFrozenEventPredicate;
-        }
-
-        @Override
-        public void onCompleted() {
-            if (done || error != null) {
-                return;
-            }
-            synchronized (this) {
-                if (frozen) {
-                    done = true;
-                } else {
-                    child.onCompleted();
-                    unsubscribe();
-                }
-            }
         }
 
         @Override
@@ -132,9 +151,29 @@ public class OperatorFreeze<T> implements Observable.Operator<T, T> {
                     error = e;
                 } else {
                     child.onError(e);
-                    unsubscribe();
+                    //unsubscribe();
                 }
             }
+        }
+
+        @Override
+        public void onComplete() {
+            if (done || error != null) {
+                return;
+            }
+            synchronized (this) {
+                if (frozen) {
+                    done = true;
+                } else {
+                    child.onComplete();
+                    //unsubscribe();
+                }
+            }
+        }
+
+        @Override
+        public void onSubscribe(Disposable d) {
+
         }
 
         @Override
@@ -155,12 +194,12 @@ public class OperatorFreeze<T> implements Observable.Operator<T, T> {
             for (ListIterator<T> it = frozenEventsBuffer.listIterator(); it.hasNext(); ) {
                 T frozenEvent = it.next();
                 try {
-                    if (replaceFrozenEventPredicate.call(frozenEvent, event)) {
+                    if (replaceFrozenEventPredicate.apply(frozenEvent, event)) {
                         it.remove();
                     }
                 } catch (Throwable ex) {
                     Exceptions.throwIfFatal(ex);
-                    unsubscribe();
+                    //unsubscribe();
                     onError(ex);
                     return;
                 }
@@ -169,13 +208,13 @@ public class OperatorFreeze<T> implements Observable.Operator<T, T> {
         }
 
         public void forceOnComplete() {
-            child.onCompleted();
-            unsubscribe();
+            child.onComplete();
+            //unsubscribe();
         }
 
         public void forceOnError(Throwable e) {
             child.onError(e);
-            unsubscribe();
+            //unsubscribe();
         }
 
         public synchronized void setFrozen(boolean frozen) {
