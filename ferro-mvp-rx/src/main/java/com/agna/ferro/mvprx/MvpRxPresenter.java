@@ -22,18 +22,18 @@ import com.agna.ferro.mvp.view.BaseView;
 import com.agna.ferro.rx.OperatorFreeze;
 
 import org.reactivestreams.Subscriber;
-import org.reactivestreams.Subscription;
 
 import io.reactivex.Observable;
 import io.reactivex.disposables.CompositeDisposable;
 import io.reactivex.disposables.Disposable;
 import io.reactivex.functions.BiFunction;
 import io.reactivex.functions.Consumer;
+import io.reactivex.observers.DisposableObserver;
 import io.reactivex.subjects.BehaviorSubject;
 
 /**
  * Presenter with freeze logic.
- * If subscribe to {@link Observable} via one of {@link #subscribe(Observable, Subscriber)} method,
+ * If subscribe to {@link Observable} via one of {@link #(Observable, Subscriber)} method,
  * all rx events (onNext, onError, onComplete) would be frozen when view destroyed and unfrozen
  * when view recreated (see {@link OperatorFreeze}).
  *
@@ -118,23 +118,25 @@ public class MvpRxPresenter<V extends BaseView> extends MvpPresenter<V> {
      */
     private <T> Disposable subscribe(final Observable<T> observable,
                                        final OperatorFreeze<T> operator,
-                                       final Subscriber<T> subscriber) {
+                                       final Disposable subscriber) {
+/*
         Disposable subscription = observable
                 .lift(operator)
                 .subscribe(subscriber);
-        subscriptions.add(subscription);
-        return subscription;
+*/
+        subscriptions.add(subscriber);
+        return subscriber;
     }
 
     /**
-     * @see #subscribe(Observable, OperatorFreeze, Subscriber)
+     * @see #(Observable, OperatorFreeze, Subscriber)
      */
     private <T> Disposable subscribe(final Observable<T> observable,
                                        final OperatorFreeze<T> operator,
                                        final Consumer<T> onNext,
                                        final Consumer<Throwable> onError) {
         return subscribe(observable, operator,
-                new Subscriber<T>() {
+                new DisposableObserver<T>() {
                     @Override
                     public void onComplete() {
                         // do nothing
@@ -150,11 +152,6 @@ public class MvpRxPresenter<V extends BaseView> extends MvpPresenter<V> {
                     }
 
                     @Override
-                    public void onSubscribe(Subscription s) {
-
-                    }
-
-                    @Override
                     public void onNext(T t) {
                         try {
                             onNext.accept(t);
@@ -166,13 +163,13 @@ public class MvpRxPresenter<V extends BaseView> extends MvpPresenter<V> {
     }
 
     /**
-     * @see #subscribe(Observable, OperatorFreeze, Subscriber)
+     * @see #(Observable, OperatorFreeze, Subscriber)
      * @param replaceFrozenEventPredicate - used for reduce num element in freeze buffer
      *                                    @see OperatorFreeze
      */
     protected <T> Disposable subscribe(final Observable<T> observable,
                                          final BiFunction<T, T, Boolean> replaceFrozenEventPredicate,
-                                         final Subscriber<T> subscriber) {
+                                         final DisposableObserver<T> subscriber) {
 
         return subscribe(observable, createOperatorFreeze(replaceFrozenEventPredicate), subscriber);
     }
@@ -194,7 +191,7 @@ public class MvpRxPresenter<V extends BaseView> extends MvpPresenter<V> {
      * @see @link #subscribe(Observable, OperatorFreeze, Subscriber)
      */
     protected <T> Disposable subscribe(final Observable<T> observable,
-                                         final Subscriber<T> subscriber) {
+                                         final DisposableObserver<T> subscriber) {
 
         return subscribe(observable, this.<T>createOperatorFreeze(), subscriber);
     }
@@ -215,12 +212,12 @@ public class MvpRxPresenter<V extends BaseView> extends MvpPresenter<V> {
      * @return subscription
      */
     protected <T> Disposable subscribeWithoutFreezing(final Observable<T> observable,
-                                                        final Subscriber<T> subscriber) {
+                                                        final Disposable subscriber) {
 
-        Disposable subscription = observable
-                .subscribe(subscriber);
-        subscriptions.add(subscription);
-        return subscription;
+        /*Disposable subscription = observable
+                .subscribe(subscriber);*/
+        subscriptions.add(subscriber);
+        return subscriber;
     }
 
     /**
@@ -230,7 +227,7 @@ public class MvpRxPresenter<V extends BaseView> extends MvpPresenter<V> {
                                                         final Consumer<T> onNext,
                                                         final Consumer<Throwable> onError) {
 
-        return subscribeWithoutFreezing(observable, new Subscriber<T>() {
+        return subscribeWithoutFreezing(observable, new DisposableObserver<T>() {
             @Override
             public void onComplete() {
                 // do nothing
@@ -243,11 +240,6 @@ public class MvpRxPresenter<V extends BaseView> extends MvpPresenter<V> {
                 } catch (Exception e1) {
                     e1.printStackTrace();
                 }
-            }
-
-            @Override
-            public void onSubscribe(Subscription s) {
-
             }
 
             @Override
